@@ -1,49 +1,64 @@
+using Autofac;
+using CarBuddy.WebApi.Config;
+using CarBuddy.WebApi.Extensions;
+using CarBuddy.WebApi.Middlewares;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.HttpsPolicy;
-using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
+using Microsoft.OpenApi.Models;
 
 namespace CarBuddy.WebApi
 {
     public class Startup
     {
-        public Startup(IConfiguration configuration)
-        {
-            Configuration = configuration;
-        }
+        private readonly IConfiguration _configuration;
 
-        public IConfiguration Configuration { get; }
+        public Startup(IConfiguration configuration) => _configuration = configuration;
 
-        // This method gets called by the runtime. Use this method to add services to the container.
         public void ConfigureServices(IServiceCollection services)
         {
-            services.AddControllers();
+            services.AddDefaultDbContext(_configuration.GetConnectionString("DefaultConnection"));
+            services.AddDefaultCors("CorsPolicy", _configuration["ClientUrl"]);
+            services.AddDefaultAuthentication(_configuration);
+            services.AddDefaultAuthorization();
+            services.AddSignalR();
+            services.AddSingleton(_ => new SmtpConfig(_configuration.GetSection("Smtp")));
+            services.AddMvc();
+
+            services.AddSwaggerGen(options =>
+                  options.SwaggerDoc("v1", new OpenApiInfo { Title = "CarBuddy API", Version = "v1" }));
+
+            services.AddControllers(options => options.EnableEndpointRouting = false)
+                .AddNewtonsoftJson(options => options.SerializerSettings.ReferenceLoopHandling = Newtonsoft.Json.ReferenceLoopHandling.Ignore);
         }
 
-        // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
+        public void ConfigureContainer(ContainerBuilder builder)
+        {
+            builder.RegisterDependencies();
+        }
+
         public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
         {
             if (env.IsDevelopment())
             {
                 app.UseDeveloperExceptionPage();
+                app.UseSwagger();
+                app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "CarBuddy API V1"));
             }
 
-            app.UseHttpsRedirection();
-
             app.UseRouting();
-
+            app.UseCors("CorsPolicy");
+            app.UseAuthentication();
             app.UseAuthorization();
+            app.UseStaticFiles();
+            app.UseMiddleware<ExceptionMiddleware>();
 
             app.UseEndpoints(endpoints =>
             {
+                endpoints.MapHubs();
                 endpoints.MapControllers();
             });
         }
